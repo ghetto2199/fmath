@@ -1,6 +1,6 @@
 /*
 	This original source code is from http://www.chokkan.org/blog/archives/352
-	this modified version requires Xbyak(http://homepage1.nifty.com/herumi/soft/xbyak_e.html)
+	this modified version requires Xbyak(https://github.com/herumi/xbyak/)
 
 	g++ -O3 -fomit-frame-pointer -march=core2 -msse4 -fno-operator-names fastexp.cpp -mfpmath=sse fastexp.cpp
 
@@ -183,8 +183,7 @@ Simply create a console project, and add this file to the project.
 #include "xbyak/xbyak_util.h"
 /*
     Useful macro definitions for memory alignment:
-        http://homepage1.nifty.com/herumi/prog/gcc-and-vc.html#MIE_ALIGN
- */
+*/
 
 #ifdef _MSC_VER
 #define MIE_ALIGN(x) __declspec(align(x))
@@ -1049,9 +1048,27 @@ void testLimits()
 	}
 }
 
+void testSlots()
+{
+	float vals[4] = {0.1f, 20.0f, -20.0f, -40.0f};
+	float expvals[4] = {0.0f};
+	for (int i = 0; i < 4; i++) {
+		__m128 x = _mm_set_ps(vals[(i + 3) % 4], vals[(i + 2) % 4], vals[(i + 1) % 4], vals[(i + 0) % 4]);
+		_mm_storeu_ps(expvals, fmath::exp_ps(x));
+		for (int j = 0; j < 4; j++) {
+			int idx = (i + j) % 4;
+			float expect = fmath::exp(vals[idx]);
+			if (fabs(expect - expvals[j]) > 1e-13f) {
+				printf("%d: expect[%d]=%.17g != shuffled[%d]=%.17g\n", i, idx, expect, j, expvals[j]);
+			}
+		}
+	}
+}
+
 int main()
 {
 	testLimits();
+	testSlots();
 	benchmark("std::exp    ", ::exp);
 	benchmark("fmath::expd ", fmath::expd);
 
