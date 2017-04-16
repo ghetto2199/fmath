@@ -42,8 +42,8 @@
 	#ifndef __GNUC_PREREQ
 	#define __GNUC_PREREQ(major, minor) ((((__GNUC__) << 16) + (__GNUC_MINOR__)) >= (((major) << 16) + (minor)))
 	#endif
-	#if __GNUC_PREREQ(4, 4) || !defined(__GNUC__)
-		/* GCC >= 4.4 and non-GCC compilers */
+	#if __GNUC_PREREQ(4, 4) || (__clang__ > 0 && __clang_major__ >= 3) || !defined(__GNUC__)
+		/* GCC >= 4.4 or clang or non-GCC compilers */
 		#include <x86intrin.h>
 	#elif __GNUC_PREREQ(4, 1)
 		/* GCC 4.1, 4.2, and 4.3 do not have x86intrin.h, directly include SSE2 header */
@@ -485,10 +485,17 @@ inline double expd(double x)
 #endif
 }
 
-// not fast
-#if 0
 inline __m128d exp_pd(__m128d x)
 {
+#if 0 // faster on Haswell
+	MIE_ALIGN(16) double buf[2];
+	memcpy(buf, &x, sizeof(buf));
+	buf[0] = expd(buf[0]);
+	buf[1] = expd(buf[1]);
+	__m128d y;
+	memcpy(&y, buf, sizeof(buf));
+	return y;
+#else // faster on Skeylake
 	using namespace local;
 	const ExpdVar<>& c = C<>::expdVar;
 	const double b = double(3ULL << 51);
@@ -522,8 +529,8 @@ __m128i iaxL = _mm_castpd_si128(_mm_load_sd((const double*)&c.tbl[adr0]));
 	y = _mm_add_pd(_mm_sub_pd(y, t), mC1);
 	y = _mm_mul_pd(y, _mm_castsi128_pd(u));
 	return y;
-}
 #endif
+}
 
 /*
 	px : pointer to array of double
@@ -681,17 +688,17 @@ inline __m256 exp_ps256(__m256 x)
 	using namespace local;
 	const ExpVar<>& expVar = C<>::expVar;
 
-	__m256i limit = _mm256_castps_si256(_mm256_and_ps(x, *(const __m256*)expVar.i7fffffff));
-	int over = _mm256_movemask_epi8(_mm256_cmpgt_epi32(limit, *(const __m256i*)expVar.maxX));
+	__m256i limit = _mm256_castps_si256(_mm256_and_ps(x, *reinterpret_cast<const __m256*>(expVar.i7fffffff)));
+	int over = _mm256_movemask_epi8(_mm256_cmpgt_epi32(limit, *reinterpret_cast<const __m256i*>(expVar.maxX)));
 	if (over) {
 		x = _mm256_min_ps(x, _mm256_load_ps(expVar.maxX));
 		x = _mm256_max_ps(x, _mm256_load_ps(expVar.minX));
 	}
-	__m256i r = _mm256_cvtps_epi32(_mm256_mul_ps(x, *(const __m256*)expVar.a));
-	__m256 t = _mm256_sub_ps(x, _mm256_mul_ps(_mm256_cvtepi32_ps(r), *(const __m256*)expVar.b));
-	t = _mm256_add_ps(t, *(const __m256*)expVar.f1);
-	__m256i v8 = _mm256_and_si256(r, *(const __m256i*)expVar.mask_s);
-	__m256i u8 = _mm256_add_epi32(r, *(const __m256i*)expVar.i127s);
+	__m256i r = _mm256_cvtps_epi32(_mm256_mul_ps(x, *reinterpret_cast<const __m256*>(expVar.a)));
+	__m256 t = _mm256_sub_ps(x, _mm256_mul_ps(_mm256_cvtepi32_ps(r), *reinterpret_cast<const __m256*>(expVar.b)));
+	t = _mm256_add_ps(t, *reinterpret_cast<const __m256*>(expVar.f1));
+	__m256i v8 = _mm256_and_si256(r, *reinterpret_cast<const __m256i*>(expVar.mask_s));
+	__m256i u8 = _mm256_add_epi32(r, *reinterpret_cast<const __m256i*>(expVar.i127s));
 	u8 = _mm256_srli_epi32(u8, expVar.s);
 	u8 = _mm256_slli_epi32(u8, 23);
 #if 1
@@ -843,5 +850,27 @@ __m128 (*const exp_ps)(__m128) = local::C<>::getInstance().exp_ps_;
 
 // exp2(x) = pow(2, x)
 inline float exp2(float x) { return fmath::exp(x * 0.6931472f); }
+
+/*
+	this function may be optimized in the future
+*/
+inline __m128d log_pd(__m128d x)
+{
+	double d[2];
+	memcpy(d, &x, sizeof(d));
+	d[0] = ::log(d[0]);
+	d[1] = ::log(d[1]);
+	__m128d m;
+	memcpy(&m, d, sizeof(m));
+	return m;
+}
+inline __m128 pow_ps(__m128 x, __m128 y)
+{
+	return exp_ps(_mm_mul_ps(y, log_ps(x)));
+}
+inline __m128d pow_pd(__m128d x, __m128d y)
+{
+	return exp_pd(_mm_mul_pd(y, log_pd(x)));
+}
 
 } // fmath
